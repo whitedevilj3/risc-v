@@ -1,0 +1,132 @@
+module mips_32(clk1,clk2)
+input clk1,clk2;
+reg [31:0] if_id_ir,if_id_npc;
+reg [31:0] id_ex_ir,id_ex_npc,id_ex_a,id_ex_b,id_ex_imm;
+reg [31:0] ex_mem_ir,ex_mem_aluout,ex_mem_b,ex_mem_cond;
+reg [31:0] mem_wb_ir,mem_wb_aluout,mem_wb_lmd;
+                        
+reg [31:0] REG [31:0];
+reg [31:0] Mem [1:1023];
+reg [3:0] id_ex_type;
+reg HLT = 1'b1;
+reg taken = 1'b0;
+parameter ADD = 6'b000000,SUB = 6'b000001,AND = 6'b000010,OR = 6'b000011,SLT = 6'b000100,MUL = 6'b000101,LW = 6'b001000,SW = 6'b001001,ADDI = 6'b001010,SUBI = 6'b001011,SLTI = 6'b001100,BNEQZ = 6'b001101,BEQZ = 6'b001110;
+parameter r_r_alu = 4'b0000,r_m_alu = 4'b0001,load = 4'b0010,store = 4'b0011,branch = 4'b0100,halted = 4'b0101;
+always @(clk1) begin
+if(halted==0) begin
+        if((beqz==1 && ex_mem_cond ==1)||(bneqz==0 && ex_mem_cond == 0)) begin
+                if_id_ir <= Mem[ex_mem_alu];
+                if_id_npc <= ex_mem_alu + 1;
+                if_if_pc <= ex_mem_alu +1;
+        end
+        else begin
+                if_id_ir <= Mem[PC];
+                if_id_npc <= pc+1;
+                pc <= pc+1;
+        end
+end
+end
+                                
+//id_stage
+always @(clk2) begin
+        if(halted == 0) begin
+                id_ex_a <=REG[if_id_ir[25:21]];
+                id_ex_b <= REG[if_id_ir[20:16]];
+                id_ex_ir <= if_id_ir;
+                id_ex_npc <= if_id_npc;
+                id_ex_imm <= {{15{if_id_ir[15]}},if_id_ir[15;0]};
+                case(if_id_ir[31:26])
+                        ADD,SUB,MUL,SLT,AND,OR,XOR: id_ex_type <= r_r_alu;
+                        ADDI,SUBI,MULTI,SLTI: id_ex_type <= r_m_alu;
+                        LW:id_ex_type <= load;
+                        SW: id_ex_type <= store;
+                        BEQZ,BNEQZ: id_ex_type <= branch;
+                        HLT: id_ex_type <= halted;
+                endcase
+#ex_stage
+always @(clk1) begin
+        if(halted == 0) begin
+                ex_mem_ir <= id_ex_ir;
+                ex_mem_b <= id_ex_b;
+                ex_mem_a <= id_ex_a;
+                ex_mem_type <= id_ex_type;
+                case(id_ex_type)
+                        r_r_alu: begin
+                                case(if_id_ir[31:26])
+                                        ADD: ex_mem_alu <= id_ex_a +id_ex_b;
+                                        SUB: ex_mem_alu <= id_ex_a - id_ex_b;
+                                        AND: ex_mem_alu <= id_ex_a & id_ex_b;
+                                        OR: ex_mem_alu <= id_ex_a | id_ex_b;
+                                endcase
+                        end      
+                        r_m_alu: begin
+                                case(if_id_ir[31:26])
+                                        ADDI: ex_mem_alu <= id_ex_b+id_ex_imm;
+                                        SUBI: ex_mem_alu <= id_ex_b-id_ex_imm;
+                                        SLTI: ex_mem_alu <A= id_ex_b<<id_ex_imm;
+                                endcase
+                        end
+                        load,store: begin
+                                                      ex_mem_alu = id_ex_b+id_ex_imm
+                                              end
+                                              branch: begin
+                                                      ex_mem_alu = id_ex_npc+id_ex_imm;
+                                              end
+                                      endcase
+                              end
+                        //mem
+                        always @(clk2) begin
+                              if(halted == 0) begin
+                                      case(ex_mem_type)
+                                              r_r_alu,r_m_alu: begin
+                                                      mem_wb_alu <= ex_mem_alu;
+                                              load: begin
+                                                      mem_wb_lmd <= Mem[ex_mem_alu];
+                                              end
+                                              store: begin
+                                                      if(taken==0) Mem[ex_mem_alu] <= ex_mem_a;
+                                              end
+                                      endcase
+                              end
+                        end
+                        //wb
+                        always @(clk1) begin
+                              if(taken==0) begin       
+                                      
+                                      case(mem_wb_type)
+                                              r_r_alu,r_m_alu: begin
+                                                      Reg[mem_wb_ir[25:21]] <= mem_wb_alu;
+                                              load: begin
+                                                      Reg[mem_wb_ir[25:21]] <= mem_wb_lmd;
+                                              branch: begin
+                                                 ex_mem_alu = id_ex_npc+id_ex_imm;
+                        end
+                endcase
+        end
+//mem
+always @(clk2) begin
+        if(halted == 0) begin
+                case(ex_mem_type)
+                        r_r_alu,r_m_alu: begin
+                                mem_wb_alu <= ex_mem_alu;
+                        load: begin   
+                                mem_wb_lmd <= Mem[ex_mem_alu];
+                        end
+                        store: begin
+                                if(taken==0) Mem[ex_mem_alu] <= ex_mem_a;
+                        end
+                endcase
+        end
+end
+//wb
+always @(clk1) begin
+        if(taken==0) begin
+                           
+                case(mem_wb_type)
+                        r_r_alu,r_m_alu: begin
+                                Reg[mem_wb_ir[25:21]] <= mem_wb_alu;
+                        load: begin
+                                Reg[mem_wb_ir[25:21]] <= mem_wb_lmd;
+                        branch: begin  
+                                taken <= 1'b1;
+
